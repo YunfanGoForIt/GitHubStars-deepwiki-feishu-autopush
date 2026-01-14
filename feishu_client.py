@@ -77,6 +77,44 @@ class FeishuService:
         except Exception as e:
             logger.error(f"Error updating document content: {e}")
 
+    async def clear_document_content(self, document_id: str):
+        """Clear all content from a document (delete all child blocks of root)"""
+        try:
+            # 1. Get all blocks
+            list_request = ListDocumentBlockRequest.builder() \
+                .document_id(document_id) \
+                .build()
+
+            list_response = self.client.docx.v1.document_block.list(list_request)
+            if not list_response.success():
+                logger.error(f"Failed to list blocks for clearing: {list_response.msg}")
+                return False
+
+            blocks = list_response.data.items
+            if len(blocks) <= 1:
+                # Only root block exists, nothing to clear
+                return True
+
+            root_block_id = blocks[0].block_id
+
+            # 2. Delete all child blocks (except root)
+            for block in blocks[1:]:
+                delete_request = DeleteDocumentBlockRequest.builder() \
+                    .document_id(document_id) \
+                    .block_id(block.block_id) \
+                    .build()
+
+                delete_response = self.client.docx.v1.document_block.delete(delete_request)
+                if not delete_response.success():
+                    logger.warning(f"Failed to delete block {block.block_id}: {delete_response.msg}")
+
+            logger.info(f"✅ Cleared document content: {document_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error clearing document content: {e}")
+            return False
+
     def _parse_markdown_to_blocks(self, markdown: str) -> List[Any]:
         lines = markdown.split('\n')
         blocks = []

@@ -51,7 +51,34 @@
                         <p class="text-xs text-slate-500 font-medium mt-0.5">GitHub Star 智能文档生成系统</p>
                     </div>
                 </div>
-                <div>
+                <div class="flex items-center gap-3">
+                    <!-- Queue Status Indicator -->
+                    <div class="relative">
+                        <div id="queue-status" onclick="toggleQueueDetails()" class="hidden items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-100 transition-colors">
+                            <div class="flex items-center gap-1.5">
+                                <i data-lucide="list-tree" class="w-3.5 h-3.5 text-slate-500"></i>
+                                <span class="text-xs font-medium text-slate-600">队列: <span id="queue-size">0</span></span>
+                            </div>
+                            <div id="queue-processing" class="hidden items-center gap-1.5">
+                                <div class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+                                <span class="text-xs text-slate-500">处理中</span>
+                            </div>
+                            <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400" id="queue-chevron"></i>
+                        </div>
+
+                        <!-- Queue Details Dropdown -->
+                        <div id="queue-details" class="hidden absolute right-0 top-full mt-2 w-80 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                            <div class="p-4">
+                                <h3 class="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                                    <i data-lucide="list-tree" class="w-4 h-4"></i>
+                                    任务队列详情
+                                </h3>
+                                <div id="queue-info" class="space-y-2">
+                                    <!-- Queue info will be injected here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <button onclick="triggerSync(false)" class="group flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium rounded-lg transition-all shadow-sm hover:shadow hover:-translate-y-0.5 active:translate-y-0">
                         <i data-lucide="rotate-cw" class="w-4 h-4 transition-transform group-hover:rotate-180"></i>
                         同步新 Star 项目
@@ -213,6 +240,11 @@
                                             <i data-lucide="refresh-ccw" class="w-3 h-3 text-slate-400"></i> 重试
                                         </button>
                                     ` : ''}
+                                    ${repo.status === 'completed' && repo.feishu_doc_token ? `
+                                        <button onclick="regenerateRepo('${repo.repo_id}')" class="opacity-0 group-hover:opacity-100 transition-opacity text-xs bg-white hover:bg-brand-50 text-brand-700 px-2 py-1 rounded border border-brand-200 shadow-sm flex items-center gap-1">
+                                            <i data-lucide="sparkles" class="w-3 h-3 text-brand-500"></i> 重新生成
+                                        </button>
+                                    ` : ''}
                                 </div>
                                 ${repo.error_message ? `
                                     <div class="text-xs ${repo.status === 'skipped' ? 'text-slate-500 bg-slate-50 border-slate-200' : 'text-rose-500 bg-rose-50 border-rose-100'} px-2 py-1 rounded max-w-sm break-all leading-relaxed border">
@@ -277,7 +309,7 @@
                 const originalHtml = btn.innerHTML;
                 btn.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i> 提交中...';
                 lucide.createIcons();
-                
+
                 const response = await fetch(`/api/retry/${repoId}`, { method: 'POST' });
                 if (response.ok) {
                     // Optimistic update
@@ -290,6 +322,44 @@
                 }
             } catch (error) {
                 console.error('Error retrying repo:', error);
+                alert('系统错误，请查看控制台');
+            }
+        }
+
+        async function regenerateRepo(repoId) {
+            if (!confirm('确定要重新生成文档吗？这将清空原有文档内容并重新生成。')) {
+                return;
+            }
+
+            try {
+                const btn = event.target.closest('button');
+                btn.disabled = true;
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<i data-lucide="loader-2" class="w-3 h-3 animate-spin"></i> 生成中...';
+                lucide.createIcons();
+
+                const response = await fetch(`/api/regenerate/${repoId}`, { method: 'POST' });
+                if (response.ok) {
+                    // Show success message
+                    btn.innerHTML = '<i data-lucide="check" class="w-3 h-3"></i> 已提交';
+                    lucide.createIcons();
+
+                    // Reload after a delay
+                    setTimeout(() => {
+                        loadRepos();
+                        btn.innerHTML = originalHtml;
+                        btn.disabled = false;
+                        lucide.createIcons();
+                    }, 3000);
+                } else {
+                    const data = await response.json();
+                    alert(data.error || '重新生成请求失败');
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    lucide.createIcons();
+                }
+            } catch (error) {
+                console.error('Error regenerating repo:', error);
                 alert('系统错误，请查看控制台');
             }
         }
@@ -329,8 +399,154 @@
         // Initial load
         lucide.createIcons();
         loadRepos();
+        updateQueueStatus();
         // Poll every 5 seconds
         setInterval(loadRepos, 5000);
+        setInterval(updateQueueStatus, 3000);
+
+        async function updateQueueStatus() {
+            try {
+                const response = await fetch('/api/queue/status');
+                const status = await response.json();
+
+                const queueStatusEl = document.getElementById('queue-status');
+                const queueSizeEl = document.getElementById('queue-size');
+                const queueProcessingEl = document.getElementById('queue-processing');
+                const queueInfoEl = document.getElementById('queue-info');
+
+                // Show queue status if there are repos or processing
+                if (status.queue_size > 0 || status.is_processing) {
+                    queueStatusEl.classList.remove('hidden');
+                    queueStatusEl.classList.add('flex');
+                    queueSizeEl.textContent = status.queue_size;
+
+                    // Update queue details
+                    let detailsHTML = '';
+
+                    // Show current processing repo
+                    if (status.is_processing && status.current_repo) {
+                        const taskType = status.current_repo.type === 'sync' ? '同步' : '重新生成';
+                        const addedTime = new Date(status.current_repo.added_at);
+                        const timeAgo = Math.floor((Date.now() - addedTime.getTime()) / 1000);
+                        const typeLabel = status.current_repo.repo_type === 'new_star' ? '🆕' :
+                                        status.current_repo.repo_type === 'regenerate' ? '🔄' : '🔁';
+
+                        detailsHTML += `
+                            <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                    <span class="text-sm font-medium text-green-800">正在处理</span>
+                                </div>
+                                <div class="text-xs bg-white px-3 py-2 rounded-lg border border-green-200">
+                                    <div class="font-semibold text-green-800">${typeLabel} ${status.current_repo.repo_name}</div>
+                                    <div class="text-green-600 mt-1 flex items-center gap-2">
+                                        <span>${taskType}</span>
+                                        <span>•</span>
+                                        <span>已运行 ${timeAgo} 秒</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // Show waiting repos
+                    if (status.waiting_repos && status.waiting_repos.length > 0) {
+                        const displayRepos = status.waiting_repos.slice(0, 10); // Show max 10
+
+                        detailsHTML += `
+                            <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <i data-lucide="clock" class="w-3.5 h-3.5 text-slate-500"></i>
+                                    <span class="text-sm font-medium text-slate-700">等待中</span>
+                                    <span class="text-xs text-slate-500 ml-auto">${status.queue_size} 个仓库</span>
+                                </div>
+                                <div class="space-y-1.5">
+                        `;
+
+                        displayRepos.forEach((repo, index) => {
+                            const typeLabel = repo.repo_type === 'new_star' ? '🆕' :
+                                            repo.repo_type === 'regenerate' ? '🔄' : '🔁';
+                            const taskTypeLabel = repo.type === 'sync' ? '同步' : '重新生成';
+
+                            detailsHTML += `
+                                <div class="text-xs bg-white px-2 py-1.5 rounded border border-slate-200 text-slate-600 flex items-center justify-between">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="font-mono text-slate-400">#${index + 1}</span>
+                                        <span>${typeLabel}</span>
+                                        <span class="font-medium">${repo.repo_name}</span>
+                                    </div>
+                                    <span class="text-slate-400">${taskTypeLabel}</span>
+                                </div>
+                            `;
+                        });
+
+                        if (status.queue_size > 10) {
+                            detailsHTML += `
+                                <div class="text-xs text-slate-500 italic text-center py-2">
+                                    ...还有 ${status.queue_size - 10} 个仓库
+                                </div>
+                            `;
+                        }
+
+                        detailsHTML += `
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    if (!status.is_processing && status.queue_size === 0) {
+                        detailsHTML = `
+                            <div class="text-center text-sm text-slate-500 py-4">
+                                <i data-lucide="check-circle" class="w-8 h-8 mx-auto mb-2 text-green-500"></i>
+                                队列为空，所有任务已完成
+                            </div>
+                        `;
+                    }
+
+                    queueInfoEl.innerHTML = detailsHTML;
+
+                    if (status.is_processing) {
+                        queueProcessingEl.classList.remove('hidden');
+                        queueProcessingEl.classList.add('flex');
+                    } else {
+                        queueProcessingEl.classList.add('hidden');
+                        queueProcessingEl.classList.remove('flex');
+                    }
+                } else {
+                    queueStatusEl.classList.add('hidden');
+                    queueStatusEl.classList.remove('flex');
+                }
+
+                // Re-render icons
+                lucide.createIcons();
+            } catch (error) {
+                console.error('Error updating queue status:', error);
+            }
+        }
+
+        function toggleQueueDetails() {
+            const details = document.getElementById('queue-details');
+            const chevron = document.getElementById('queue-chevron');
+
+            if (details.classList.contains('hidden')) {
+                details.classList.remove('hidden');
+                chevron.classList.add('rotate-180');
+            } else {
+                details.classList.add('hidden');
+                chevron.classList.remove('rotate-180');
+            }
+        }
+
+        // Close queue details when clicking outside
+        document.addEventListener('click', function(event) {
+            const queueStatus = document.getElementById('queue-status');
+            const queueDetails = document.getElementById('queue-details');
+
+            if (!queueStatus.contains(event.target) && !queueDetails.contains(event.target)) {
+                queueDetails.classList.add('hidden');
+                document.getElementById('queue-chevron').classList.remove('rotate-180');
+            }
+        });
     </script>
 </body>
 </html>

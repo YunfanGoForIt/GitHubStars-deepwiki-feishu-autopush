@@ -208,7 +208,38 @@ class RAGRefiner:
                 self.vector_store.add_documents(chunks, embeddings, sources)
                 logger.info(f"Indexed {len(chunks)} chunks from {basename}")
 
-    async def generate_draft(self, content: str) -> str:
+    async def generate_title(self, repo_name: str, description: str = "", overview_content: str = "") -> str:
+        """Generate a concise Chinese title for the repository"""
+        logger.info("Generating AI title...")
+
+        system_prompt = (
+            "你是一个专业的技术文档标题撰写专家。"
+            "请根据仓库名称、描述和概述内容，生成一个简洁的中文标题。\n"
+            "要求：\n"
+            "1. 标题长度在 10 个字以内\n"
+            "2. 准确概括仓库的核心功能和价值\n"
+            "3. 使用简洁的技术术语\n"
+            "4. 只返回标题，不要有其他任何解释或标点符号"
+        )
+
+        user_content = f"仓库名称：{repo_name}\n"
+        if description:
+            user_content += f"描述：{description}\n"
+        if overview_content:
+            user_content += f"概述（前200字）：{overview_content[:200]}\n"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ]
+
+        title = await self.llm.chat_completion(messages, temperature=0.2)
+        # Clean up the title
+        title = title.strip().strip('"').strip("'").strip("。").strip("：")
+        logger.info(f"Generated title: {title}")
+        return title
+
+    async def generate_draft(self, content: str, readme_content: Optional[str] = None) -> str:
         """Phase 1: Generate Draft with RAG placeholders"""
         logger.info("Generating Draft...")
 
@@ -232,8 +263,12 @@ class RAGRefiner:
             "3. 不要使用任何加粗语法，即** **。"
         )
 
+        user_content = f"请处理以下文档：\n\n{content}"
+        if readme_content:
+            user_content += f"\n\n---\n\n以下是项目的 README 文件，可以帮助你更好地理解项目：\n\n{readme_content}"
+
         messages = [
-            {"role": "user", "content": f"请处理以下文档：\n\n{content}"},
+            {"role": "user", "content": user_content},
             {"role": "system", "content": system_prompt}
         ]
 
