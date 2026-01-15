@@ -1,6 +1,8 @@
 # DART - DeepWiki Auto Refinement & Throw
 # DART - DeepWiki 自动精炼与投递
 
+![DART Banner](DART-banner.png)
+
 An automated pipeline that monitors GitHub Stars, fetches technical documentation via DeepWiki MCP, refines content using a RAG (Retrieval-Augmented Generation) workflow, and publishes polished Chinese wikis to Feishu (Lark).
 一个自动化流水线，用于**监控 GitHub 星标仓库**，通过 DeepWiki MCP 获取技术文档，利用 RAG（检索增强生成）工作流优化内容，并将高质量的中文 Wiki 投递发布至飞书（Lark）。
 
